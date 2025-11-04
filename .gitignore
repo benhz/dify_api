@@ -1,0 +1,68 @@
+# --- Python basics ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Virtual envs / uv / poetry / pipenv
+.venv/
+venv/
+.envrc
+
+# --- Flask / general secrets & config ---
+.env
+.env.*
+*.env
+*.secret
+secrets.*
+*.pem
+*.key
+*.crt
+*.p12
+*.keystore
+*.jks
+
+# Logs & runtime
+*.log
+*.pid
+*.sqlite3
+instance/
+.werkszeug/
+
+# Coverage / test / build
+.coverage
+.coverage.*
+.cache/
+.pytest_cache/
+htmlcov/
+dist/
+build/
+site/
+
+# MyPy / type-checkers
+.mypy_cache/
+.pytype/
+.dmypy.json
+
+# Editors / IDE
+.vscode/
+.vscode-*
+.idea/
+*.iml
+
+# OS / misc
+.DS_Store
+Thumbs.db
+
+# Docker / compose
+*.tar
+docker-data/
+docker-compose.override.yml
+
+# Node/JS (若项目偶有前端子目录)
+node_modules/
+npm-debug.log*
+yarn-error.log
+.pnp.*
+pytest.ini
