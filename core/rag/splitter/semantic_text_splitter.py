@@ -285,13 +285,14 @@ class SemanticTextSplitter(TextSplitter):
         # Generate embeddings
         embeddings = self._get_embeddings(sentences)
 
-        # Check if embeddings are empty (use size for numpy arrays)
-        if embeddings.size == 0:
+        # Check if embeddings are empty or invalid shape
+        if embeddings.size == 0 or len(embeddings.shape) < 2:
             return []
 
         # Calculate similarities between consecutive sentences
         similarities = []
-        for i in range(len(embeddings) - 1):
+        n_embeddings = embeddings.shape[0]
+        for i in range(n_embeddings - 1):
             sim = self._cosine_similarity(embeddings[i], embeddings[i + 1])
             similarities.append(sim)
 
