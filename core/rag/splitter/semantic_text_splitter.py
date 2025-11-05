@@ -87,31 +87,56 @@ class SemanticTextSplitter(TextSplitter):
         if not paragraphs:
             return []
 
-        # Step 2: Split into sentences
-        all_sentences = []
-        sentence_to_paragraph = []  # Track which paragraph each sentence belongs to
-        for para_idx, paragraph in enumerate(paragraphs):
-            sentences = self._split_into_sentences(paragraph)
-            all_sentences.extend(sentences)
-            sentence_to_paragraph.extend([para_idx] * len(sentences))
+        # Step 2: Process each paragraph individually to avoid embedding explosion
+        all_chunks = []
+        for paragraph in paragraphs:
+            # Check if paragraph needs semantic splitting
+            para_tokens = self._get_token_count(paragraph)
 
-        if not all_sentences:
+            if para_tokens <= self._max_tokens:
+                # Paragraph is small enough, keep as is
+                all_chunks.append(paragraph)
+            else:
+                # Paragraph is too large, apply semantic splitting within this paragraph
+                para_chunks = self._split_paragraph_semantically(paragraph)
+                all_chunks.extend(para_chunks)
+
+        if not all_chunks:
             return []
 
-        # If only one sentence, return it directly
-        if len(all_sentences) == 1:
-            return [all_sentences[0]]
-
-        # Step 3 & 4: Generate embeddings and find semantic boundaries
-        semantic_boundaries = self._find_semantic_boundaries(all_sentences)
-
-        # Step 5: Generate semantic chunks
-        semantic_chunks = self._generate_semantic_chunks(all_sentences, semantic_boundaries)
-
-        # Step 6: Post-processing (merge short, split long, add overlap)
-        final_chunks = self._post_process_chunks(semantic_chunks)
+        # Step 3: Post-processing (merge short, split long, add overlap)
+        final_chunks = self._post_process_chunks(all_chunks)
 
         return final_chunks
+
+    def _split_paragraph_semantically(self, paragraph: str) -> list[str]:
+        """
+        Split a single paragraph using semantic analysis.
+        This method only processes one paragraph at a time to avoid embedding explosion.
+
+        Args:
+            paragraph: Single paragraph to split
+
+        Returns:
+            List of chunks from this paragraph
+        """
+        # Split into sentences
+        sentences = self._split_into_sentences(paragraph)
+
+        if not sentences:
+            return [paragraph]
+
+        # If only one sentence, return it directly
+        if len(sentences) == 1:
+            return [sentences[0]]
+
+        # Generate embeddings and find semantic boundaries (only for this paragraph)
+        semantic_boundaries = self._find_semantic_boundaries(sentences)
+
+        # Generate semantic chunks
+        semantic_chunks = self._generate_semantic_chunks(sentences, semantic_boundaries)
+
+        return semantic_chunks
 
     def _split_by_separator(self, text: str) -> list[str]:
         """Split text by the primary separator."""
@@ -258,7 +283,8 @@ class SemanticTextSplitter(TextSplitter):
         # Generate embeddings
         embeddings = self._get_embeddings(sentences)
 
-        if len(embeddings) == 0:
+        # Check if embeddings are empty (use size for numpy arrays)
+        if embeddings.size == 0:
             return []
 
         # Calculate similarities between consecutive sentences
