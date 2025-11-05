@@ -5,6 +5,7 @@ from core.rag.index_processor.index_processor_base import BaseIndexProcessor
 from core.rag.index_processor.processor.paragraph_index_processor import ParagraphIndexProcessor
 from core.rag.index_processor.processor.parent_child_index_processor import ParentChildIndexProcessor
 from core.rag.index_processor.processor.qa_index_processor import QAIndexProcessor
+from core.rag.index_processor.processor.semantic_index_processor import SemanticIndexProcessor
 
 
 class IndexProcessorFactory:
@@ -25,5 +26,7 @@ class IndexProcessorFactory:
             return QAIndexProcessor()
         elif self._index_type == IndexType.PARENT_CHILD_INDEX:
             return ParentChildIndexProcessor()
+        elif self._index_type == IndexType.SEMANTIC_INDEX:
+            return SemanticIndexProcessor()
         else:
             raise ValueError(f"Index type {self._index_type} is not supported.")

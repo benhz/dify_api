@@ -2330,6 +2330,44 @@ class DocumentService:
                 if not isinstance(knowledge_config.process_rule.rules.segmentation.max_tokens, int):
                     raise ValueError("Process rule segmentation max_tokens is invalid")
 
+            # Validate semantic chunking parameters (optional)
+            segmentation = knowledge_config.process_rule.rules.segmentation
+
+            # Validate threshold_amount (optional, default: 95)
+            if segmentation.threshold_amount is not None:
+                if not isinstance(segmentation.threshold_amount, int):
+                    raise ValueError("Process rule segmentation threshold_amount must be an integer")
+                if not (0 <= segmentation.threshold_amount <= 100):
+                    raise ValueError("Process rule segmentation threshold_amount must be between 0 and 100")
+
+            # Validate buffer_size (optional, default: 2)
+            if segmentation.buffer_size is not None:
+                if not isinstance(segmentation.buffer_size, int):
+                    raise ValueError("Process rule segmentation buffer_size must be an integer")
+                if segmentation.buffer_size < 0:
+                    raise ValueError("Process rule segmentation buffer_size must be non-negative")
+
+            # Validate min_chunk_tokens (optional, default: 150)
+            if segmentation.min_chunk_tokens is not None:
+                if not isinstance(segmentation.min_chunk_tokens, int):
+                    raise ValueError("Process rule segmentation min_chunk_tokens must be an integer")
+                if segmentation.min_chunk_tokens < 1:
+                    raise ValueError("Process rule segmentation min_chunk_tokens must be at least 1")
+
+            # Validate max_chunk_tokens (optional, defaults to max_tokens)
+            if segmentation.max_chunk_tokens is not None:
+                if not isinstance(segmentation.max_chunk_tokens, int):
+                    raise ValueError("Process rule segmentation max_chunk_tokens must be an integer")
+                if segmentation.max_chunk_tokens < 1:
+                    raise ValueError("Process rule segmentation max_chunk_tokens must be at least 1")
+
+                # Ensure max_chunk_tokens >= min_chunk_tokens if both are specified
+                if segmentation.min_chunk_tokens is not None:
+                    if segmentation.max_chunk_tokens < segmentation.min_chunk_tokens:
+                        raise ValueError(
+                            "Process rule segmentation max_chunk_tokens must be greater than or equal to min_chunk_tokens"
+                        )
+
     @classmethod
     def estimate_args_validate(cls, args: dict):
         if "info_list" not in args or not args["info_list"]:
@@ -2412,6 +2450,44 @@ class DocumentService:
 
             if not isinstance(args["process_rule"]["rules"]["segmentation"]["max_tokens"], int):
                 raise ValueError("Process rule segmentation max_tokens is invalid")
+
+            # Validate semantic chunking parameters (optional)
+            segmentation = args["process_rule"]["rules"]["segmentation"]
+
+            # Validate threshold_amount (optional, default: 95)
+            if "threshold_amount" in segmentation and segmentation["threshold_amount"] is not None:
+                if not isinstance(segmentation["threshold_amount"], int):
+                    raise ValueError("Process rule segmentation threshold_amount must be an integer")
+                if not (0 <= segmentation["threshold_amount"] <= 100):
+                    raise ValueError("Process rule segmentation threshold_amount must be between 0 and 100")
+
+            # Validate buffer_size (optional, default: 2)
+            if "buffer_size" in segmentation and segmentation["buffer_size"] is not None:
+                if not isinstance(segmentation["buffer_size"], int):
+                    raise ValueError("Process rule segmentation buffer_size must be an integer")
+                if segmentation["buffer_size"] < 0:
+                    raise ValueError("Process rule segmentation buffer_size must be non-negative")
+
+            # Validate min_chunk_tokens (optional, default: 150)
+            if "min_chunk_tokens" in segmentation and segmentation["min_chunk_tokens"] is not None:
+                if not isinstance(segmentation["min_chunk_tokens"], int):
+                    raise ValueError("Process rule segmentation min_chunk_tokens must be an integer")
+                if segmentation["min_chunk_tokens"] < 1:
+                    raise ValueError("Process rule segmentation min_chunk_tokens must be at least 1")
+
+            # Validate max_chunk_tokens (optional, defaults to max_tokens)
+            if "max_chunk_tokens" in segmentation and segmentation["max_chunk_tokens"] is not None:
+                if not isinstance(segmentation["max_chunk_tokens"], int):
+                    raise ValueError("Process rule segmentation max_chunk_tokens must be an integer")
+                if segmentation["max_chunk_tokens"] < 1:
+                    raise ValueError("Process rule segmentation max_chunk_tokens must be at least 1")
+
+                # Ensure max_chunk_tokens >= min_chunk_tokens if both are specified
+                if "min_chunk_tokens" in segmentation and segmentation["min_chunk_tokens"] is not None:
+                    if segmentation["max_chunk_tokens"] < segmentation["min_chunk_tokens"]:
+                        raise ValueError(
+                            "Process rule segmentation max_chunk_tokens must be greater than or equal to min_chunk_tokens"
+                        )
 
     @staticmethod
     def batch_update_document_status(

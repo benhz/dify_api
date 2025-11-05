@@ -61,6 +61,11 @@ class Segmentation(BaseModel):
     separator: str = "\n"
     max_tokens: int
     chunk_overlap: int = 0
+    # Semantic chunking parameters
+    threshold_amount: int | None = None  # Threshold percentage (e.g., 95)
+    buffer_size: int | None = None  # Smoothing window size (e.g., 2)
+    min_chunk_tokens: int | None = None  # Minimum chunk size (e.g., 150)
+    max_chunk_tokens: int | None = None  # Maximum chunk size (e.g., 1000)
 
 
 class Rule(BaseModel):
