@@ -70,7 +70,13 @@ class SemanticTextSplitter(TextSplitter):
 
     def split_text(self, text: str) -> list[str]:
         """
-        Split text using semantic analysis.
+        Split text using semantic analysis following the 5-step process:
+
+        Step 1: separator - Split by physical boundaries
+        Step 2: Semantic analysis - Find semantic breakpoints within each paragraph
+        Step 3: max_tokens - Force split long chunks
+        Step 4: chunk_overlap - Add overlap between chunks
+        Step 5: min/max_chunk_tokens - Enforce size constraints
 
         Args:
             text: Input text to split
@@ -83,42 +89,38 @@ class SemanticTextSplitter(TextSplitter):
 
         # Step 1: Split by separator (physical boundaries)
         paragraphs = self._split_by_separator(text)
-
         if not paragraphs:
             return []
 
-        # Step 2: Process each paragraph individually to avoid embedding explosion
-        all_chunks = []
+        # Step 2: Semantic analysis - Find semantic breakpoints within each paragraph
+        semantic_chunks = []
         for paragraph in paragraphs:
-            # Check if paragraph needs semantic splitting
-            para_tokens = self._get_token_count(paragraph)
+            para_chunks = self._apply_semantic_splitting(paragraph)
+            semantic_chunks.extend(para_chunks)
 
-            if para_tokens <= self._max_tokens:
-                # Paragraph is small enough, keep as is
-                all_chunks.append(paragraph)
-            else:
-                # Paragraph is too large, apply semantic splitting within this paragraph
-                para_chunks = self._split_paragraph_semantically(paragraph)
-                all_chunks.extend(para_chunks)
-
-        if not all_chunks:
+        if not semantic_chunks:
             return []
 
-        # Step 3: Post-processing (merge short, split long, add overlap)
-        final_chunks = self._post_process_chunks(all_chunks)
+        # Step 3: max_tokens - Force split chunks that exceed max_tokens
+        size_limited_chunks = self._enforce_max_tokens(semantic_chunks)
+
+        # Step 4: chunk_overlap - Add overlap between chunks
+        overlapped_chunks = self._add_overlap(size_limited_chunks)
+
+        # Step 5: min/max_chunk_tokens - Enforce size constraints
+        final_chunks = self._enforce_size_constraints(overlapped_chunks)
 
         return final_chunks
 
-    def _split_paragraph_semantically(self, paragraph: str) -> list[str]:
+    def _apply_semantic_splitting(self, paragraph: str) -> list[str]:
         """
-        Split a single paragraph using semantic analysis.
-        This method only processes one paragraph at a time to avoid embedding explosion.
+        Apply semantic splitting to a single paragraph.
 
         Args:
-            paragraph: Single paragraph to split
+            paragraph: Single paragraph to analyze
 
         Returns:
-            List of chunks from this paragraph
+            List of semantically meaningful chunks from this paragraph
         """
         # Split into sentences
         sentences = self._split_into_sentences(paragraph)
@@ -126,17 +128,17 @@ class SemanticTextSplitter(TextSplitter):
         if not sentences:
             return [paragraph]
 
-        # If only one sentence, return it directly
+        # If only one sentence, return it
         if len(sentences) == 1:
-            return [sentences[0]]
+            return sentences
 
-        # Generate embeddings and find semantic boundaries (only for this paragraph)
-        semantic_boundaries = self._find_semantic_boundaries(sentences)
+        # Find semantic boundaries using embeddings
+        boundaries = self._find_semantic_boundaries(sentences)
 
-        # Generate semantic chunks
-        semantic_chunks = self._generate_semantic_chunks(sentences, semantic_boundaries)
+        # Generate chunks based on boundaries
+        chunks = self._generate_semantic_chunks(sentences, boundaries)
 
-        return semantic_chunks
+        return chunks
 
     def _split_by_separator(self, text: str) -> list[str]:
         """Split text by the primary separator."""
@@ -365,39 +367,151 @@ class SemanticTextSplitter(TextSplitter):
 
         return chunks
 
-    def _post_process_chunks(self, chunks: list[str]) -> list[str]:
+    def _enforce_max_tokens(self, chunks: list[str]) -> list[str]:
         """
-        Post-process chunks: merge short, split long, add overlap.
+        Step 3: Force split chunks that exceed max_tokens.
 
         Args:
-            chunks: Initial chunks
+            chunks: List of chunks from semantic analysis
 
         Returns:
-            Final processed chunks
+            List of chunks where no chunk exceeds max_tokens
         """
         if not chunks:
             return []
 
-        # Step 1: Merge short chunks
-        merged_chunks = self._merge_short_chunks(chunks)
+        result = []
+        for chunk in chunks:
+            chunk_tokens = self._get_token_count(chunk)
 
-        # Step 2: Split long chunks
-        split_chunks = self._split_long_chunks(merged_chunks)
+            if chunk_tokens <= self._max_tokens:
+                result.append(chunk)
+            else:
+                # Split by sentences first
+                sentences = self._split_into_sentences(chunk)
+                current_chunk = ""
+                current_tokens = 0
 
-        # Step 3: Add overlap
-        final_chunks = self._add_overlap(split_chunks)
+                for sentence in sentences:
+                    sentence_tokens = self._get_token_count(sentence)
 
-        return final_chunks
+                    # If single sentence exceeds max, force split
+                    if sentence_tokens > self._max_tokens:
+                        if current_chunk:
+                            result.append(current_chunk.strip())
+                            current_chunk = ""
+                            current_tokens = 0
 
-    def _merge_short_chunks(self, chunks: list[str]) -> list[str]:
+                        # Force split the long sentence
+                        sub_chunks = self._force_split_by_tokens(sentence, self._max_tokens)
+                        result.extend(sub_chunks)
+                    else:
+                        # Check if adding this sentence would exceed max
+                        if current_tokens + sentence_tokens > self._max_tokens:
+                            if current_chunk:
+                                result.append(current_chunk.strip())
+                            current_chunk = sentence
+                            current_tokens = sentence_tokens
+                        else:
+                            current_chunk += ' ' + sentence if current_chunk else sentence
+                            current_tokens += sentence_tokens
+
+                if current_chunk:
+                    result.append(current_chunk.strip())
+
+        return result
+
+    def _add_overlap(self, chunks: list[str]) -> list[str]:
         """
-        Merge chunks that are shorter than min_chunk_tokens.
-        Prefers merging with the previous chunk.
+        Step 4: Add overlap between chunks to maintain context continuity.
+
+        Overlap structure:
+        [Chunk1]
+        [Last N tokens of Chunk1 + Chunk2 + Last N tokens of Chunk2]
+        [Last N tokens of Chunk2 + Chunk3 + ...]
+
+        Args:
+            chunks: List of chunks
+
+        Returns:
+            List of chunks with overlap added
+        """
+        if not chunks or self._chunk_overlap <= 0 or len(chunks) <= 1:
+            return chunks
+
+        overlapped_chunks = []
+
+        for i in range(len(chunks)):
+            chunk = chunks[i]
+            prefix = ""
+            suffix = ""
+
+            # Add prefix: last N tokens from previous chunk
+            if i > 0:
+                prev_chunk = chunks[i - 1]
+                prefix = self._get_last_n_tokens(prev_chunk, self._chunk_overlap)
+
+            # Add suffix: first N tokens from next chunk (prepare for next chunk's prefix)
+            # Actually, we only add current chunk + prepare suffix for calculation
+            # The next chunk will use current chunk's suffix as its prefix
+
+            # Combine: prefix + current_chunk
+            if prefix:
+                chunk = prefix + ' ' + chunk
+
+            overlapped_chunks.append(chunk.strip())
+
+        return overlapped_chunks
+
+    def _get_last_n_tokens(self, text: str, n_tokens: int) -> str:
+        """
+        Get the last N tokens from text.
+
+        Args:
+            text: Input text
+            n_tokens: Number of tokens to extract
+
+        Returns:
+            Last N tokens as string
+        """
+        words = text.split()
+        if not words:
+            return ""
+
+        # Build from the end
+        result_words = []
+        current_tokens = 0
+
+        for word in reversed(words):
+            test_text = word + ' ' + ' '.join(result_words) if result_words else word
+            test_tokens = self._get_token_count(test_text)
+
+            if test_tokens > n_tokens:
+                break
+
+            result_words.insert(0, word)
+            current_tokens = test_tokens
+
+        return ' '.join(result_words)
+
+    def _enforce_size_constraints(self, chunks: list[str]) -> list[str]:
+        """
+        Step 5: Enforce min_chunk_tokens and max_chunk_tokens constraints.
+
+        - Merge chunks smaller than min_chunk_tokens
+        - Ensure no chunk exceeds max_chunk_tokens
+
+        Args:
+            chunks: List of chunks
+
+        Returns:
+            List of chunks within size constraints
         """
         if not chunks:
             return []
 
-        merged = []
+        # First pass: merge short chunks
+        merged_chunks = []
         i = 0
 
         while i < len(chunks):
@@ -407,73 +521,64 @@ class SemanticTextSplitter(TextSplitter):
             # If chunk is too short, try to merge
             if current_tokens < self._min_chunk_tokens:
                 # Try to merge with previous chunk
-                if merged:
-                    merged[-1] = merged[-1] + ' ' + current_chunk
-                # Otherwise, try to merge with next chunk
-                elif i + 1 < len(chunks):
-                    current_chunk = current_chunk + ' ' + chunks[i + 1]
-                    merged.append(current_chunk)
-                    i += 1  # Skip next chunk
-                else:
-                    # Last chunk and too short, keep it anyway
-                    merged.append(current_chunk)
+                if merged_chunks:
+                    last_chunk = merged_chunks[-1]
+                    last_tokens = self._get_token_count(last_chunk)
+
+                    # Only merge if combined size doesn't exceed max
+                    combined_tokens = last_tokens + current_tokens
+                    if combined_tokens <= self._max_chunk_tokens:
+                        merged_chunks[-1] = last_chunk + ' ' + current_chunk
+                        i += 1
+                        continue
+
+                # Try to merge with next chunk
+                if i + 1 < len(chunks):
+                    next_chunk = chunks[i + 1]
+                    next_tokens = self._get_token_count(next_chunk)
+                    combined_tokens = current_tokens + next_tokens
+
+                    if combined_tokens <= self._max_chunk_tokens:
+                        merged_chunks.append(current_chunk + ' ' + next_chunk)
+                        i += 2
+                        continue
+
+                # Can't merge, keep as is (even if too short)
+                merged_chunks.append(current_chunk)
             else:
-                merged.append(current_chunk)
+                merged_chunks.append(current_chunk)
 
             i += 1
 
-        return merged
-
-    def _split_long_chunks(self, chunks: list[str]) -> list[str]:
-        """
-        Split chunks that exceed max_chunk_tokens.
-        Splits at sentence boundaries or by max_tokens.
-        """
-        if not chunks:
-            return []
-
-        split_chunks = []
-
-        for chunk in chunks:
+        # Second pass: ensure no chunk exceeds max_chunk_tokens
+        final_chunks = []
+        for chunk in merged_chunks:
             chunk_tokens = self._get_token_count(chunk)
 
             if chunk_tokens <= self._max_chunk_tokens:
-                split_chunks.append(chunk)
+                final_chunks.append(chunk)
             else:
                 # Split at sentence boundaries
                 sentences = self._split_into_sentences(chunk)
-
-                current_chunk_text = ""
-                current_chunk_tokens = 0
+                current_chunk = ""
+                current_tokens = 0
 
                 for sentence in sentences:
                     sentence_tokens = self._get_token_count(sentence)
 
-                    # If single sentence exceeds max, force split by max_tokens
-                    if sentence_tokens > self._max_chunk_tokens:
-                        if current_chunk_text:
-                            split_chunks.append(current_chunk_text.strip())
-                            current_chunk_text = ""
-                            current_chunk_tokens = 0
-
-                        # Force split long sentence
-                        sub_chunks = self._force_split_by_tokens(sentence, self._max_tokens)
-                        split_chunks.extend(sub_chunks)
+                    if current_tokens + sentence_tokens > self._max_chunk_tokens:
+                        if current_chunk:
+                            final_chunks.append(current_chunk.strip())
+                        current_chunk = sentence
+                        current_tokens = sentence_tokens
                     else:
-                        # Check if adding this sentence exceeds max
-                        if current_chunk_tokens + sentence_tokens > self._max_chunk_tokens:
-                            if current_chunk_text:
-                                split_chunks.append(current_chunk_text.strip())
-                            current_chunk_text = sentence
-                            current_chunk_tokens = sentence_tokens
-                        else:
-                            current_chunk_text += ' ' + sentence if current_chunk_text else sentence
-                            current_chunk_tokens += sentence_tokens
+                        current_chunk += ' ' + sentence if current_chunk else sentence
+                        current_tokens += sentence_tokens
 
-                if current_chunk_text:
-                    split_chunks.append(current_chunk_text.strip())
+                if current_chunk:
+                    final_chunks.append(current_chunk.strip())
 
-        return split_chunks
+        return final_chunks
 
     def _force_split_by_tokens(self, text: str, max_tokens: int) -> list[str]:
         """Force split text by token count when no good boundary exists."""
@@ -495,39 +600,6 @@ class SemanticTextSplitter(TextSplitter):
             chunks.append(current_chunk.strip())
 
         return chunks if chunks else [text]
-
-    def _add_overlap(self, chunks: list[str]) -> list[str]:
-        """
-        Add overlap between consecutive chunks.
-        """
-        if not chunks or self._chunk_overlap <= 0 or len(chunks) <= 1:
-            return chunks
-
-        overlapped_chunks = []
-
-        for i in range(len(chunks)):
-            chunk = chunks[i]
-
-            # Add overlap from previous chunk (end of previous)
-            if i > 0:
-                prev_chunk = chunks[i - 1]
-                prev_words = prev_chunk.split()
-
-                # Take last N tokens from previous chunk
-                overlap_text = ""
-                for word in reversed(prev_words):
-                    test_text = word + ' ' + overlap_text if overlap_text else word
-                    test_tokens = self._get_token_count(test_text)
-                    if test_tokens > self._chunk_overlap:
-                        break
-                    overlap_text = test_text
-
-                if overlap_text:
-                    chunk = overlap_text + ' ' + chunk
-
-            overlapped_chunks.append(chunk.strip())
-
-        return overlapped_chunks
 
     def split_documents(self, documents: list[Document]) -> list[Document]:
         """
