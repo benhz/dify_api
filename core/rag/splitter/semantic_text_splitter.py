@@ -210,7 +210,11 @@ class SemanticTextSplitter(TextSplitter):
 
     def _get_embeddings(self, texts: list[str]) -> np.ndarray:
         """
-        Generate embeddings for a list of texts.
+        Generate embeddings for a list of texts with dynamic batching.
+
+        Uses dual thresholds to avoid timeout and improve performance:
+        - max_sentences_per_batch: 1000 sentences
+        - max_bytes_per_batch: 48KB UTF-8 bytes
 
         Args:
             texts: List of text strings
@@ -223,8 +227,8 @@ class SemanticTextSplitter(TextSplitter):
 
         if self._embedding_model_instance:
             try:
-                # Use the embedding model instance to generate embeddings
-                embeddings = self._embedding_model_instance.invoke_text_embedding(texts=texts)
+                # Use dynamic batching to avoid timeout and improve performance
+                embeddings = self._get_embeddings_with_batching(texts)
                 return np.array(embeddings)
             except Exception:
                 # Fallback to simple hash-based embeddings if model fails
@@ -232,6 +236,61 @@ class SemanticTextSplitter(TextSplitter):
         else:
             # Use fallback embeddings
             return self._fallback_embeddings(texts)
+
+    def _get_embeddings_with_batching(self, texts: list[str]) -> list:
+        """
+        Get embeddings with dynamic batching to handle large text lists safely.
+
+        Uses dual thresholds:
+        - max_sentences_per_batch: 1000 sentences
+        - max_bytes_per_batch: 48KB UTF-8 bytes
+
+        Accumulates texts into batches until either threshold is reached,
+        then processes the batch and continues with remaining texts.
+
+        Args:
+            texts: List of text strings
+
+        Returns:
+            List of embeddings in original order
+        """
+        MAX_SENTENCES_PER_BATCH = 1000
+        MAX_BYTES_PER_BATCH = 48 * 1024  # 48 KiB
+
+        all_embeddings = []
+        current_batch = []
+        current_bytes = 0
+
+        for text in texts:
+            text_bytes = len(text.encode('utf-8'))
+
+            # Check if adding this text would exceed either threshold
+            would_exceed_count = len(current_batch) >= MAX_SENTENCES_PER_BATCH
+            would_exceed_bytes = current_bytes + text_bytes > MAX_BYTES_PER_BATCH
+
+            # If batch is not empty and would exceed, process current batch
+            if current_batch and (would_exceed_count or would_exceed_bytes):
+                batch_embeddings = self._embedding_model_instance.invoke_text_embedding(
+                    texts=current_batch
+                )
+                all_embeddings.extend(batch_embeddings)
+
+                # Reset batch
+                current_batch = []
+                current_bytes = 0
+
+            # Add current text to batch
+            current_batch.append(text)
+            current_bytes += text_bytes
+
+        # Process remaining batch
+        if current_batch:
+            batch_embeddings = self._embedding_model_instance.invoke_text_embedding(
+                texts=current_batch
+            )
+            all_embeddings.extend(batch_embeddings)
+
+        return all_embeddings
 
     def _fallback_embeddings(self, texts: list[str]) -> np.ndarray:
         """
