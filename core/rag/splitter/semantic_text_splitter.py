@@ -224,8 +224,11 @@ class SemanticTextSplitter(TextSplitter):
         if self._embedding_model_instance:
             try:
                 # Use the embedding model instance to generate embeddings
-                embeddings = self._embedding_model_instance.invoke_text_embedding(texts=texts)
-                return np.array(embeddings)
+                result = self._embedding_model_instance.invoke_text_embedding(texts=texts)
+                # 方案 1：标准字段
+                if hasattr(result, "embeddings"):
+                    embeddings = np.array(result.embeddings, dtype=np.float32)
+                    return embeddings
             except Exception:
                 # Fallback to simple hash-based embeddings if model fails
                 return self._fallback_embeddings(texts)
