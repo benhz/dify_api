@@ -152,8 +152,9 @@ class SemanticTextSplitter(TextSplitter):
         Check if text contains a table structure.
 
         Detects:
-        - Markdown tables (MUST have |---|---| separator line)
-        - HTML tables (<table>...</table>)
+        - Markdown tables with separator line: |---|---|
+        - Markdown tables without separator: multiple rows with | delimiters
+        - HTML tables: <table>...</table>
 
         Args:
             text: Text to check
@@ -165,24 +166,31 @@ class SemanticTextSplitter(TextSplitter):
         if '<table' in text.lower() and '</table>' in text.lower():
             return True
 
-        # Check for Markdown table structure
-        # MUST have separator line like | --- | --- | --- |
         lines = text.split('\n')
+        table_like_lines = []
+
         for line in lines:
             stripped = line.strip()
             if not stripped:
                 continue
 
-            # Separator line should:
-            # 1. Start and end with |
-            # 2. Only contain |, -, :, and spaces
-            # 3. Have at least 2 dashes (for a valid separator)
+            # Check if line starts and ends with |
             if stripped.startswith('|') and stripped.endswith('|'):
-                # Remove all valid table separator characters
+                # Check if it's a separator line (|---|---|)
                 check_str = stripped.replace('|', '').replace('-', '').replace(':', '').replace(' ', '')
-                # If nothing remains, it's a separator line
                 if len(check_str) == 0 and stripped.count('-') >= 2:
+                    # Found separator line, definitely a table
                     return True
+
+                # Count how many | delimiters (at least 3 for a valid table row)
+                pipe_count = stripped.count('|')
+                if pipe_count >= 3:  # At least 2 columns (3 pipes: |col1|col2|)
+                    table_like_lines.append(line)
+
+        # If we have 3+ consecutive lines with | delimiters, it's a table
+        # Even without a separator line
+        if len(table_like_lines) >= 3:
+            return True
 
         return False
 
@@ -563,7 +571,10 @@ class SemanticTextSplitter(TextSplitter):
         """
         Split a table by rows while preserving table structure.
 
-        Each chunk includes the table header (first 2 lines) plus data rows.
+        Each chunk includes the table header plus data rows.
+        Header can be:
+        - 1 line (column names only)
+        - 2 lines (column names + separator |---|)
 
         Args:
             table: Table text to split
@@ -572,38 +583,46 @@ class SemanticTextSplitter(TextSplitter):
         Returns:
             List of table chunks, each with header + data rows
         """
-        lines = table.split('\n')
-        if len(lines) <= 2:
-            # Table too small to split (just header)
+        lines = [line for line in table.split('\n') if line.strip()]
+
+        if len(lines) <= 1:
+            # Table too small to split
             return [table]
 
-        # Extract header (usually first 2 lines: column names + separator)
+        # Detect header: first line + optional separator line
         header_lines = []
         data_lines = []
 
-        for i, line in enumerate(lines):
-            if i < 2:
-                header_lines.append(line)
-            else:
-                # Check if this is still part of header (separator line)
-                stripped = line.strip()
-                if stripped and stripped.startswith('|') and stripped.endswith('|'):
-                    check_str = stripped.replace('|', '').replace('-', '').replace(':', '').replace(' ', '')
-                    if len(check_str) == 0:
-                        header_lines.append(line)
-                    else:
-                        data_lines.append(line)
-                else:
-                    data_lines.append(line)
+        # First line is always header
+        header_lines.append(lines[0])
 
-        # If no clear header/data separation, just split by lines
-        if not header_lines or not data_lines:
-            return self._split_lines_by_tokens(lines, max_tokens)
+        # Check if second line is separator (|---|---|)
+        header_end_index = 1
+        if len(lines) > 1:
+            stripped = lines[1].strip()
+            if stripped.startswith('|') and stripped.endswith('|'):
+                check_str = stripped.replace('|', '').replace('-', '').replace(':', '').replace(' ', '')
+                if len(check_str) == 0 and stripped.count('-') >= 2:
+                    # Second line is separator
+                    header_lines.append(lines[1])
+                    header_end_index = 2
 
+        # Everything else is data
+        data_lines = lines[header_end_index:]
+
+        # If no data rows, return as is
+        if not data_lines:
+            return [table]
+
+        # Check if table is small enough to keep as one chunk
+        total_tokens = self._get_token_count(table)
+        if total_tokens <= max_tokens:
+            return [table]
+
+        # Split into chunks: each chunk = header + some data rows
         header_text = '\n'.join(header_lines)
         header_tokens = self._get_token_count(header_text)
 
-        # Build chunks: each chunk = header + some data rows
         chunks = []
         current_chunk_lines = header_lines.copy()
         current_tokens = header_tokens
@@ -613,7 +632,7 @@ class SemanticTextSplitter(TextSplitter):
 
             # Check if adding this line would exceed max
             if current_tokens + line_tokens > max_tokens and len(current_chunk_lines) > len(header_lines):
-                # Save current chunk and start new one
+                # Save current chunk and start new one with header
                 chunks.append('\n'.join(current_chunk_lines))
                 current_chunk_lines = header_lines.copy()
                 current_tokens = header_tokens
