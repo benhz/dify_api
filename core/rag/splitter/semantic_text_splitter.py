@@ -152,9 +152,8 @@ class SemanticTextSplitter(TextSplitter):
         Check if text contains a table structure.
 
         Detects:
-        - Markdown tables (|---|---|)
+        - Markdown tables (MUST have |---|---| separator)
         - HTML tables (<table>...</table>)
-        - Multiple consecutive lines with | characters
 
         Args:
             text: Text to check
@@ -163,21 +162,18 @@ class SemanticTextSplitter(TextSplitter):
             True if text contains a table
         """
         # Check for HTML table tags
-        if '<table' in text.lower() or '</table>' in text.lower():
+        if '<table' in text.lower() and '</table>' in text.lower():
             return True
 
         # Check for Markdown table structure
+        # MUST have separator line like |---|---|
         lines = text.split('\n')
-        pipe_lines = [line for line in lines if '|' in line]
-
-        # If more than 2 lines contain pipes, likely a table
-        if len(pipe_lines) >= 2:
-            # Check if there's a separator line (|---|---|)
-            for line in pipe_lines:
-                if re.match(r'^[\s\|:\-]+$', line):
-                    return True
-            # Or if multiple lines have similar pipe patterns
-            if len(pipe_lines) >= 3:
+        for line in lines:
+            # Match lines that are ONLY pipes, dashes, colons, and spaces
+            # Example: |---|---| or | --- | --- |
+            stripped = line.strip()
+            if stripped and re.match(r'^\|[\s\-:]+\|[\s\-:|]+$', stripped):
+                # Found a separator line, this is a Markdown table
                 return True
 
         return False
