@@ -147,18 +147,59 @@ class SemanticTextSplitter(TextSplitter):
             return [p.strip() for p in parts if p.strip()]
         return [text]
 
+    def _is_table(self, text: str) -> bool:
+        """
+        Check if text contains a table structure.
+
+        Detects:
+        - Markdown tables (|---|---|)
+        - HTML tables (<table>...</table>)
+        - Multiple consecutive lines with | characters
+
+        Args:
+            text: Text to check
+
+        Returns:
+            True if text contains a table
+        """
+        # Check for HTML table tags
+        if '<table' in text.lower() or '</table>' in text.lower():
+            return True
+
+        # Check for Markdown table structure
+        lines = text.split('\n')
+        pipe_lines = [line for line in lines if '|' in line]
+
+        # If more than 2 lines contain pipes, likely a table
+        if len(pipe_lines) >= 2:
+            # Check if there's a separator line (|---|---|)
+            for line in pipe_lines:
+                if re.match(r'^[\s\|:\-]+$', line):
+                    return True
+            # Or if multiple lines have similar pipe patterns
+            if len(pipe_lines) >= 3:
+                return True
+
+        return False
+
     def _split_into_sentences(self, text: str) -> list[str]:
         """
         Split text into sentences using multiple language patterns.
+
+        IMPORTANT: Tables are kept intact and not split.
 
         Args:
             text: Text to split
 
         Returns:
-            List of sentences
+            List of sentences (tables are kept as single items)
         """
         if not text:
             return []
+
+        # Check if entire text is a table - if so, keep it whole
+        if self._is_table(text):
+            return [text]
 
         # Combine all patterns
         combined_pattern = '|'.join(f'({p})' for p in self._sentence_patterns)
@@ -202,11 +243,33 @@ class SemanticTextSplitter(TextSplitter):
         return sentences
 
     def _get_token_count(self, text: str) -> int:
-        """Get token count for text."""
-        if self._embedding_model_instance:
-            return self._embedding_model_instance.get_text_embedding_num_tokens([text])[0]
-        else:
-            return GPT2Tokenizer.get_num_tokens(text)
+        """
+        Estimate token count for text using character count.
+
+        Uses a simple estimation: length / 4 for English, length / 2 for Chinese.
+        This avoids frequent network requests to the embedding API.
+
+        Args:
+            text: Text to count tokens for
+
+        Returns:
+            Estimated token count
+        """
+        if not text:
+            return 0
+
+        # Count Chinese characters (CJK)
+        chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf]', text))
+
+        # Estimate tokens:
+        # - Chinese: ~1 token per character (conservative: 0.5)
+        # - English: ~1 token per 4 characters
+        total_chars = len(text)
+        english_chars = total_chars - chinese_chars
+
+        estimated_tokens = int(chinese_chars * 0.5 + english_chars / 4)
+
+        return max(1, estimated_tokens)  # At least 1 token
 
     def _get_embeddings(self, texts: list[str]) -> np.ndarray:
         """
