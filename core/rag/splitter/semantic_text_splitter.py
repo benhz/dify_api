@@ -254,7 +254,7 @@ class SemanticTextSplitter(TextSplitter):
             texts: List of text strings
 
         Returns:
-            List of embeddings in original order
+            List of embeddings (list[list[float]]) in original order
         """
         MAX_SENTENCES_PER_BATCH = 64
         MAX_BYTES_PER_BATCH = 24 * 1024  # 48 KiB
@@ -272,10 +272,11 @@ class SemanticTextSplitter(TextSplitter):
 
             # If batch is not empty and would exceed, process current batch
             if current_batch and (would_exceed_count or would_exceed_bytes):
-                batch_embeddings = self._embedding_model_instance.invoke_text_embedding(
+                batch_result = self._embedding_model_instance.invoke_text_embedding(
                     texts=current_batch
                 )
-                all_embeddings.extend(batch_embeddings)
+                # Extract embeddings from TextEmbeddingResult object
+                all_embeddings.extend(batch_result.embeddings)
 
                 # Reset batch
                 current_batch = []
@@ -287,10 +288,11 @@ class SemanticTextSplitter(TextSplitter):
 
         # Process remaining batch
         if current_batch:
-            batch_embeddings = self._embedding_model_instance.invoke_text_embedding(
+            batch_result = self._embedding_model_instance.invoke_text_embedding(
                 texts=current_batch
             )
-            all_embeddings.extend(batch_embeddings)
+            # Extract embeddings from TextEmbeddingResult object
+            all_embeddings.extend(batch_result.embeddings)
 
         return all_embeddings
 
