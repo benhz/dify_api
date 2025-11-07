@@ -194,24 +194,140 @@ class SemanticTextSplitter(TextSplitter):
 
         return False
 
+    def _extract_tables(self, text: str) -> list[tuple[int, int]]:
+        """
+        Extract table positions (start, end) from text.
+
+        Args:
+            text: Text to analyze
+
+        Returns:
+            List of (start_pos, end_pos) tuples for each table
+        """
+        lines = text.split('\n')
+        tables = []
+        current_table_start = None
+        current_table_lines = []
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+
+            # Check if this line is part of a table
+            is_table_line = False
+            if stripped.startswith('|') and stripped.endswith('|') and stripped.count('|') >= 3:
+                is_table_line = True
+
+            if is_table_line:
+                if current_table_start is None:
+                    current_table_start = i
+                current_table_lines.append(i)
+            else:
+                # End of table
+                if current_table_start is not None and len(current_table_lines) >= 3:
+                    # Valid table (3+ rows)
+                    tables.append((current_table_start, current_table_lines[-1]))
+                current_table_start = None
+                current_table_lines = []
+
+        # Check last table
+        if current_table_start is not None and len(current_table_lines) >= 3:
+            tables.append((current_table_start, current_table_lines[-1]))
+
+        return tables
+
     def _split_into_sentences(self, text: str) -> list[str]:
         """
         Split text into sentences using multiple language patterns.
 
-        IMPORTANT: Tables are kept intact and not split.
+        Tables are treated as single sentences and kept intact.
+        Regular text is split by sentence boundaries.
 
         Args:
             text: Text to split
 
         Returns:
-            List of sentences (tables are kept as single items)
+            List of sentences (tables are single items)
         """
         if not text:
             return []
 
-        # Check if entire text is a table - if so, keep it whole
-        if self._is_table(text):
-            return [text]
+        lines = text.split('\n')
+
+        # Find all table regions
+        table_regions = self._extract_tables(text)
+
+        # Build a set of table line indices for quick lookup
+        table_line_indices = set()
+        for start, end in table_regions:
+            for i in range(start, end + 1):
+                table_line_indices.add(i)
+
+        # Split text into segments: [text, table, text, table, ...]
+        segments = []
+        current_text_lines = []
+
+        for i, line in enumerate(lines):
+            if i in table_line_indices:
+                # This line is part of a table
+                if current_text_lines:
+                    # Save accumulated text
+                    segments.append(('text', '\n'.join(current_text_lines)))
+                    current_text_lines = []
+
+                # Check if this is the start of a new table
+                is_table_start = i not in table_line_indices or (i > 0 and i - 1 not in table_line_indices)
+                if is_table_start or not segments or segments[-1][0] != 'table':
+                    # Start a new table segment
+                    table_lines = []
+                    # Collect all consecutive table lines
+                    for j in range(i, len(lines)):
+                        if j in table_line_indices:
+                            table_lines.append(lines[j])
+                        else:
+                            break
+                    if table_lines:
+                        segments.append(('table', '\n'.join(table_lines)))
+            else:
+                # Regular text line
+                if segments and segments[-1][0] == 'table':
+                    # Previous segment was a table, start new text segment
+                    current_text_lines = [line]
+                else:
+                    current_text_lines.append(line)
+
+        # Add remaining text
+        if current_text_lines:
+            segments.append(('text', '\n'.join(current_text_lines)))
+
+        # Now split each segment
+        sentences = []
+        for seg_type, seg_text in segments:
+            if seg_type == 'table':
+                # Table as a single sentence
+                sentences.append(seg_text)
+            else:
+                # Split text by sentence patterns
+                text_sentences = self._split_text_by_patterns(seg_text)
+                sentences.extend(text_sentences)
+
+        # Fallback
+        if not sentences:
+            sentences = [text]
+
+        return sentences
+
+    def _split_text_by_patterns(self, text: str) -> list[str]:
+        """
+        Split regular text by sentence patterns.
+
+        Args:
+            text: Text to split
+
+        Returns:
+            List of sentences
+        """
+        if not text or not text.strip():
+            return []
 
         # Combine all patterns
         combined_pattern = '|'.join(f'({p})' for p in self._sentence_patterns)
@@ -247,10 +363,6 @@ class SemanticTextSplitter(TextSplitter):
         # Add remaining text
         if current_sentence.strip():
             sentences.append(current_sentence.strip())
-
-        # Fallback: if no sentences found, return the whole text
-        if not sentences:
-            sentences = [text]
 
         return sentences
 
