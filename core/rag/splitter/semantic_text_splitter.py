@@ -152,7 +152,7 @@ class SemanticTextSplitter(TextSplitter):
         Check if text contains a table structure.
 
         Detects:
-        - Markdown tables (MUST have |---|---| separator)
+        - Markdown tables (MUST have |---|---| separator line)
         - HTML tables (<table>...</table>)
 
         Args:
@@ -166,15 +166,23 @@ class SemanticTextSplitter(TextSplitter):
             return True
 
         # Check for Markdown table structure
-        # MUST have separator line like |---|---|
+        # MUST have separator line like | --- | --- | --- |
         lines = text.split('\n')
         for line in lines:
-            # Match lines that are ONLY pipes, dashes, colons, and spaces
-            # Example: |---|---| or | --- | --- |
             stripped = line.strip()
-            if stripped and re.match(r'^\|[\s\-:]+\|[\s\-:|]+$', stripped):
-                # Found a separator line, this is a Markdown table
-                return True
+            if not stripped:
+                continue
+
+            # Separator line should:
+            # 1. Start and end with |
+            # 2. Only contain |, -, :, and spaces
+            # 3. Have at least 2 dashes (for a valid separator)
+            if stripped.startswith('|') and stripped.endswith('|'):
+                # Remove all valid table separator characters
+                check_str = stripped.replace('|', '').replace('-', '').replace(':', '').replace(' ', '')
+                # If nothing remains, it's a separator line
+                if len(check_str) == 0 and stripped.count('-') >= 2:
+                    return True
 
         return False
 
@@ -494,6 +502,8 @@ class SemanticTextSplitter(TextSplitter):
         """
         Step 3: Force split chunks that exceed max_tokens.
 
+        Tables are split by rows to preserve structure.
+
         Args:
             chunks: List of chunks from semantic analysis
 
@@ -510,39 +520,143 @@ class SemanticTextSplitter(TextSplitter):
             if chunk_tokens <= self._max_tokens:
                 result.append(chunk)
             else:
-                # Split by sentences first
-                sentences = self._split_into_sentences(chunk)
-                current_chunk = ""
-                current_tokens = 0
+                # Check if this is a table - if so, split by rows
+                if self._is_table(chunk):
+                    sub_chunks = self._split_table_by_rows(chunk, self._max_tokens)
+                    result.extend(sub_chunks)
+                else:
+                    # Split by sentences first
+                    sentences = self._split_into_sentences(chunk)
+                    current_chunk = ""
+                    current_tokens = 0
 
-                for sentence in sentences:
-                    sentence_tokens = self._get_token_count(sentence)
+                    for sentence in sentences:
+                        sentence_tokens = self._get_token_count(sentence)
 
-                    # If single sentence exceeds max, force split
-                    if sentence_tokens > self._max_tokens:
-                        if current_chunk:
-                            result.append(current_chunk.strip())
-                            current_chunk = ""
-                            current_tokens = 0
-
-                        # Force split the long sentence
-                        sub_chunks = self._force_split_by_tokens(sentence, self._max_tokens)
-                        result.extend(sub_chunks)
-                    else:
-                        # Check if adding this sentence would exceed max
-                        if current_tokens + sentence_tokens > self._max_tokens:
+                        # If single sentence exceeds max, force split
+                        if sentence_tokens > self._max_tokens:
                             if current_chunk:
                                 result.append(current_chunk.strip())
-                            current_chunk = sentence
-                            current_tokens = sentence_tokens
-                        else:
-                            current_chunk += ' ' + sentence if current_chunk else sentence
-                            current_tokens += sentence_tokens
+                                current_chunk = ""
+                                current_tokens = 0
 
-                if current_chunk:
-                    result.append(current_chunk.strip())
+                            # Force split the long sentence
+                            sub_chunks = self._force_split_by_tokens(sentence, self._max_tokens)
+                            result.extend(sub_chunks)
+                        else:
+                            # Check if adding this sentence would exceed max
+                            if current_tokens + sentence_tokens > self._max_tokens:
+                                if current_chunk:
+                                    result.append(current_chunk.strip())
+                                current_chunk = sentence
+                                current_tokens = sentence_tokens
+                            else:
+                                current_chunk += ' ' + sentence if current_chunk else sentence
+                                current_tokens += sentence_tokens
+
+                    if current_chunk:
+                        result.append(current_chunk.strip())
 
         return result
+
+    def _split_table_by_rows(self, table: str, max_tokens: int) -> list[str]:
+        """
+        Split a table by rows while preserving table structure.
+
+        Each chunk includes the table header (first 2 lines) plus data rows.
+
+        Args:
+            table: Table text to split
+            max_tokens: Maximum tokens per chunk
+
+        Returns:
+            List of table chunks, each with header + data rows
+        """
+        lines = table.split('\n')
+        if len(lines) <= 2:
+            # Table too small to split (just header)
+            return [table]
+
+        # Extract header (usually first 2 lines: column names + separator)
+        header_lines = []
+        data_lines = []
+
+        for i, line in enumerate(lines):
+            if i < 2:
+                header_lines.append(line)
+            else:
+                # Check if this is still part of header (separator line)
+                stripped = line.strip()
+                if stripped and stripped.startswith('|') and stripped.endswith('|'):
+                    check_str = stripped.replace('|', '').replace('-', '').replace(':', '').replace(' ', '')
+                    if len(check_str) == 0:
+                        header_lines.append(line)
+                    else:
+                        data_lines.append(line)
+                else:
+                    data_lines.append(line)
+
+        # If no clear header/data separation, just split by lines
+        if not header_lines or not data_lines:
+            return self._split_lines_by_tokens(lines, max_tokens)
+
+        header_text = '\n'.join(header_lines)
+        header_tokens = self._get_token_count(header_text)
+
+        # Build chunks: each chunk = header + some data rows
+        chunks = []
+        current_chunk_lines = header_lines.copy()
+        current_tokens = header_tokens
+
+        for line in data_lines:
+            line_tokens = self._get_token_count(line)
+
+            # Check if adding this line would exceed max
+            if current_tokens + line_tokens > max_tokens and len(current_chunk_lines) > len(header_lines):
+                # Save current chunk and start new one
+                chunks.append('\n'.join(current_chunk_lines))
+                current_chunk_lines = header_lines.copy()
+                current_tokens = header_tokens
+
+            current_chunk_lines.append(line)
+            current_tokens += line_tokens
+
+        # Add remaining chunk
+        if len(current_chunk_lines) > len(header_lines):
+            chunks.append('\n'.join(current_chunk_lines))
+
+        return chunks if chunks else [table]
+
+    def _split_lines_by_tokens(self, lines: list[str], max_tokens: int) -> list[str]:
+        """
+        Split lines by token count when no clear structure exists.
+
+        Args:
+            lines: List of lines
+            max_tokens: Maximum tokens per chunk
+
+        Returns:
+            List of chunks
+        """
+        chunks = []
+        current_lines = []
+        current_tokens = 0
+
+        for line in lines:
+            line_tokens = self._get_token_count(line)
+
+            if current_tokens + line_tokens > max_tokens and current_lines:
+                chunks.append('\n'.join(current_lines))
+                current_lines = [line]
+                current_tokens = line_tokens
+            else:
+                current_lines.append(line)
+                current_tokens += line_tokens
+
+        if current_lines:
+            chunks.append('\n'.join(current_lines))
+
+        return chunks if chunks else ['\n'.join(lines)]
 
     def _add_overlap(self, chunks: list[str]) -> list[str]:
         """
@@ -681,25 +795,30 @@ class SemanticTextSplitter(TextSplitter):
             if chunk_tokens <= self._max_chunk_tokens:
                 final_chunks.append(chunk)
             else:
-                # Split at sentence boundaries
-                sentences = self._split_into_sentences(chunk)
-                current_chunk = ""
-                current_tokens = 0
+                # Check if this is a table - if so, split by rows
+                if self._is_table(chunk):
+                    sub_chunks = self._split_table_by_rows(chunk, self._max_chunk_tokens)
+                    final_chunks.extend(sub_chunks)
+                else:
+                    # Split at sentence boundaries
+                    sentences = self._split_into_sentences(chunk)
+                    current_chunk = ""
+                    current_tokens = 0
 
-                for sentence in sentences:
-                    sentence_tokens = self._get_token_count(sentence)
+                    for sentence in sentences:
+                        sentence_tokens = self._get_token_count(sentence)
 
-                    if current_tokens + sentence_tokens > self._max_chunk_tokens:
-                        if current_chunk:
-                            final_chunks.append(current_chunk.strip())
-                        current_chunk = sentence
-                        current_tokens = sentence_tokens
-                    else:
-                        current_chunk += ' ' + sentence if current_chunk else sentence
-                        current_tokens += sentence_tokens
+                        if current_tokens + sentence_tokens > self._max_chunk_tokens:
+                            if current_chunk:
+                                final_chunks.append(current_chunk.strip())
+                            current_chunk = sentence
+                            current_tokens = sentence_tokens
+                        else:
+                            current_chunk += ' ' + sentence if current_chunk else sentence
+                            current_tokens += sentence_tokens
 
-                if current_chunk:
-                    final_chunks.append(current_chunk.strip())
+                    if current_chunk:
+                        final_chunks.append(current_chunk.strip())
 
         return final_chunks
 
