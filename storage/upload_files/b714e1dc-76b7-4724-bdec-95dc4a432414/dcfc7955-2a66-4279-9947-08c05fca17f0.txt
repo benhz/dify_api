@@ -1,0 +1,6 @@
+天气api:
+https://api.seniverse.com/v3/weather/daily.json?key=SH2Ym6W3pbsDdKLoL
+
+测试deepseek-r1:
+curl -X POST http://192.168.7.72:2025/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"deepseek-r1","messages":[{"role":"user","content":"9.8 和 9.11 哪个大？"}],"stream":true}'
+
