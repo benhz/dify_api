@@ -370,7 +370,7 @@ class SemanticTextSplitter(TextSplitter):
         """
         Estimate token count for text using character count.
 
-        Uses a simple estimation: length / 4 for English, length / 2 for Chinese.
+        Uses a simple estimation: length / 4 for English, length / 1.5 for Chinese.
         This avoids frequent network requests to the embedding API.
 
         Args:
@@ -386,12 +386,12 @@ class SemanticTextSplitter(TextSplitter):
         chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf]', text))
 
         # Estimate tokens:
-        # - Chinese: ~1 token per character (conservative: 0.5)
+        # - Chinese: ~1.5 tokens per character (more accurate for GPT tokenizers)
         # - English: ~1 token per 4 characters
         total_chars = len(text)
         english_chars = total_chars - chinese_chars
 
-        estimated_tokens = int(chinese_chars * 0.5 + english_chars / 4)
+        estimated_tokens = int(chinese_chars / 1.5 + english_chars / 4)
 
         return max(1, estimated_tokens)  # At least 1 token
 
@@ -939,12 +939,25 @@ class SemanticTextSplitter(TextSplitter):
                     for sentence in sentences:
                         sentence_tokens = self._get_token_count(sentence)
 
-                        if current_tokens + sentence_tokens > self._max_chunk_tokens:
+                        # If a single sentence exceeds max_chunk_tokens, force split it
+                        if sentence_tokens > self._max_chunk_tokens:
+                            # Append current chunk if exists
+                            if current_chunk:
+                                final_chunks.append(current_chunk.strip())
+                                current_chunk = ""
+                                current_tokens = 0
+
+                            # Force split the long sentence
+                            split_sentences = self._force_split_by_tokens(sentence, self._max_chunk_tokens)
+                            final_chunks.extend(split_sentences)
+                        elif current_tokens + sentence_tokens > self._max_chunk_tokens:
+                            # Adding this sentence would exceed max, start new chunk
                             if current_chunk:
                                 final_chunks.append(current_chunk.strip())
                             current_chunk = sentence
                             current_tokens = sentence_tokens
                         else:
+                            # Add sentence to current chunk
                             current_chunk += ' ' + sentence if current_chunk else sentence
                             current_tokens += sentence_tokens
 
