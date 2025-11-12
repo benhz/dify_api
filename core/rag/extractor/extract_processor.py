@@ -90,7 +90,12 @@ class ExtractProcessor:
 
     @classmethod
     def extract(
-        cls, extract_setting: ExtractSetting, is_automatic: bool = False, file_path: str | None = None
+        cls,
+        extract_setting: ExtractSetting,
+        is_automatic: bool = False,
+        file_path: str | None = None,
+        process_rule: dict | None = None,
+        vision_model_instance=None,
     ) -> list[Document]:
         if extract_setting.datasource_type == DatasourceType.FILE:
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -122,7 +127,13 @@ class ExtractProcessor:
                     elif file_extension in {".htm", ".html"}:
                         extractor = HtmlExtractor(file_path)
                     elif file_extension == ".docx":
-                        extractor = WordExtractor(file_path, upload_file.tenant_id, upload_file.created_by)
+                        extractor = WordExtractor(
+                            file_path,
+                            upload_file.tenant_id,
+                            upload_file.created_by,
+                            process_rule=process_rule,
+                            vision_model_instance=vision_model_instance,
+                        )
                     elif file_extension == ".doc":
                         extractor = UnstructuredWordExtractor(file_path, unstructured_api_url, unstructured_api_key)
                     elif file_extension == ".csv":
@@ -154,7 +165,13 @@ class ExtractProcessor:
                     elif file_extension in {".htm", ".html"}:
                         extractor = HtmlExtractor(file_path)
                     elif file_extension == ".docx":
-                        extractor = WordExtractor(file_path, upload_file.tenant_id, upload_file.created_by)
+                        extractor = WordExtractor(
+                            file_path,
+                            upload_file.tenant_id,
+                            upload_file.created_by,
+                            process_rule=process_rule,
+                            vision_model_instance=vision_model_instance,
+                        )
                     elif file_extension == ".csv":
                         extractor = CSVExtractor(file_path, autodetect_encoding=True)
                     elif file_extension == ".epub":

@@ -235,18 +235,43 @@ class SemanticTextSplitter(TextSplitter):
 
         return tables
 
+    def _split_by_markdown_images(self, text: str) -> list[str]:
+        """
+        Split text by markdown images, treating each image as a separate item.
+
+        Args:
+            text: Text to split
+
+        Returns:
+            List of text parts and images
+        """
+        # Pattern to match markdown images: ![alt text](url)
+        pattern = r'(!\[[^\]]*\]\([^\)]+\))'
+
+        # Split by the pattern, keeping the delimiters
+        parts = re.split(pattern, text)
+
+        # Filter out empty parts and strip whitespace
+        result = []
+        for part in parts:
+            part = part.strip()
+            if part:
+                result.append(part)
+
+        return result if result else [text]
+
     def _split_into_sentences(self, text: str) -> list[str]:
         """
         Split text into sentences using multiple language patterns.
 
-        Tables are treated as single sentences and kept intact.
+        Tables and markdown images are treated as single sentences and kept intact.
         Regular text is split by sentence boundaries.
 
         Args:
             text: Text to split
 
         Returns:
-            List of sentences (tables are single items)
+            List of sentences (tables and images are single items)
         """
         if not text:
             return []
@@ -310,11 +335,22 @@ class SemanticTextSplitter(TextSplitter):
                 text_sentences = self._split_text_by_patterns(seg_text)
                 sentences.extend(text_sentences)
 
-        # Fallback
-        if not sentences:
-            sentences = [text]
+        # Post-process: split sentences containing markdown images
+        final_sentences = []
+        for sentence in sentences:
+            # Check if sentence contains markdown images
+            if '![' in sentence and '](' in sentence:
+                # Split by markdown images
+                parts = self._split_by_markdown_images(sentence)
+                final_sentences.extend(parts)
+            else:
+                final_sentences.append(sentence)
 
-        return sentences
+        # Fallback
+        if not final_sentences:
+            final_sentences = [text]
+
+        return final_sentences
 
     def _split_text_by_patterns(self, text: str) -> list[str]:
         """

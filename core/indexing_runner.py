@@ -251,6 +251,8 @@ class IndexingRunner:
         doc_language: str = "English",
         dataset_id: str | None = None,
         indexing_technique: str = "economy",
+        text_generation_model: str | None = None,
+        text_generation_model_provider: str | None = None,
     ) -> IndexingEstimate:
         """
         Estimate the indexing for the document.
@@ -287,6 +289,20 @@ class IndexingRunner:
                     tenant_id=tenant_id,
                     model_type=ModelType.TEXT_EMBEDDING,
                 )
+
+        # Get vision model instance if provided
+        vision_model_instance = None
+        if text_generation_model and text_generation_model_provider:
+            try:
+                vision_model_instance = self.model_manager.get_model_instance(
+                    tenant_id=tenant_id,
+                    provider=text_generation_model_provider,
+                    model_type=ModelType.LLM,
+                    model=text_generation_model,
+                )
+            except Exception:
+                # If vision model is not available, continue without it
+                vision_model_instance = None
         # keep separate, avoid union-list ambiguity
         preview_texts: list[PreviewDetail] = []
         qa_preview_texts: list[QAPreviewDetail] = []
@@ -299,7 +315,12 @@ class IndexingRunner:
             processing_rule = DatasetProcessRule(
                 mode=tmp_processing_rule["mode"], rules=json.dumps(tmp_processing_rule["rules"])
             )
-            text_docs = index_processor.extract(extract_setting, process_rule_mode=tmp_processing_rule["mode"])
+            text_docs = index_processor.extract(
+                extract_setting,
+                process_rule_mode=tmp_processing_rule["mode"],
+                process_rule=processing_rule.to_dict(),
+                vision_model_instance=vision_model_instance,
+            )
             documents = index_processor.transform(
                 text_docs,
                 embedding_model_instance=embedding_model_instance,

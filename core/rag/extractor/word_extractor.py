@@ -1,5 +1,7 @@
 """Abstract interface for document loader implementations."""
 
+import base64
+import json
 import logging
 import mimetypes
 import os
@@ -14,6 +16,7 @@ from docx import Document as DocxDocument
 
 from configs import dify_config
 from core.helper import ssrf_proxy
+from core.model_runtime.entities import ImagePromptMessageContent, TextPromptMessageContent, UserPromptMessage
 from core.rag.extractor.extractor_base import BaseExtractor
 from core.rag.models.document import Document
 from extensions.ext_database import db
@@ -32,11 +35,20 @@ class WordExtractor(BaseExtractor):
         file_path: Path to the file to load.
     """
 
-    def __init__(self, file_path: str, tenant_id: str, user_id: str):
+    def __init__(
+        self,
+        file_path: str,
+        tenant_id: str,
+        user_id: str,
+        process_rule: dict | None = None,
+        vision_model_instance=None,
+    ):
         """Initialize with file path."""
         self.file_path = file_path
         self.tenant_id = tenant_id
         self.user_id = user_id
+        self.process_rule = process_rule
+        self.vision_model_instance = vision_model_instance
 
         if "~" in self.file_path:
             self.file_path = os.path.expanduser(self.file_path)
@@ -80,13 +92,71 @@ class WordExtractor(BaseExtractor):
         parsed = urlparse(url)
         return bool(parsed.netloc) and bool(parsed.scheme)
 
+    def _should_enable_image_recognition(self) -> bool:
+        """Check if image recognition should be enabled for semantic segmentation."""
+        if not self.process_rule:
+            return False
+
+        # Check if rules exist
+        rules = self.process_rule.get("rules")
+        if not rules:
+            return False
+
+        # Get segmentation rules
+        if isinstance(rules, str):
+            try:
+                rules = json.loads(rules)
+            except Exception:
+                return False
+
+        segmentation = rules.get("segmentation", {})
+        return segmentation.get("image_recognition_enabled", False)
+
+    def _recognize_image(self, image_bytes: bytes) -> str | None:
+        """Use vision model to recognize image content."""
+        if not self.vision_model_instance:
+            return None
+
+        try:
+            # Encode image to base64
+            image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+            # Create prompt message with image
+            prompt_message = UserPromptMessage(
+                content=[
+                    TextPromptMessageContent(data="请描述这张图片的内容，用一句话简洁地说明图片中的主要内容。"),
+                    ImagePromptMessageContent(data=f"data:image/png;base64,{image_base64}"),
+                ]
+            )
+
+            # Invoke vision model
+            result = self.vision_model_instance.invoke_llm(
+                prompt_messages=[prompt_message],
+                model_parameters={"temperature": 0.0, "max_tokens": 100},
+                stream=False,
+            )
+
+            if result and hasattr(result, "message") and hasattr(result.message, "content"):
+                description = result.message.content.strip()
+                return description if description else None
+
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to recognize image: {str(e)}")
+            return None
+
     def _extract_images_from_docx(self, doc):
         image_count = 0
         image_map = {}
 
+        # Check if image recognition is enabled
+        enable_recognition = self._should_enable_image_recognition()
+
         for rel in doc.part.rels.values():
             if "image" in rel.target_ref:
                 image_count += 1
+                image_bytes = None
+
                 if rel.is_external:
                     url = rel.target_ref
                     response = ssrf_proxy.get(url)
@@ -97,7 +167,8 @@ class WordExtractor(BaseExtractor):
                         file_uuid = str(uuid.uuid4())
                         file_key = "image_files/" + self.tenant_id + "/" + file_uuid + "." + image_ext
                         mime_type, _ = mimetypes.guess_type(file_key)
-                        storage.save(file_key, response.content)
+                        image_bytes = response.content
+                        storage.save(file_key, image_bytes)
                     else:
                         continue
                 else:
@@ -109,7 +180,9 @@ class WordExtractor(BaseExtractor):
                     file_key = "image_files/" + self.tenant_id + "/" + file_uuid + "." + image_ext
                     mime_type, _ = mimetypes.guess_type(file_key)
 
-                    storage.save(file_key, rel.target_part.blob)
+                    image_bytes = rel.target_part.blob
+                    storage.save(file_key, image_bytes)
+
                 # save file to db
                 upload_file = UploadFile(
                     tenant_id=self.tenant_id,
@@ -129,7 +202,23 @@ class WordExtractor(BaseExtractor):
 
                 db.session.add(upload_file)
                 db.session.commit()
-                image_map[rel.target_part] = f"![image]({dify_config.FILES_URL}/files/{upload_file.id}/file-preview)"
+
+                # Recognize image if enabled
+                image_description = None
+                if enable_recognition and image_bytes and self.vision_model_instance:
+                    image_description = self._recognize_image(image_bytes)
+
+                # Generate markdown reference
+                if image_description:
+                    # Use description in markdown: ![description](url)
+                    image_map[
+                        rel.target_part
+                    ] = f"![{image_description}]({dify_config.FILES_URL}/files/{upload_file.id}/file-preview)"
+                else:
+                    # Use default "image" as alt text
+                    image_map[
+                        rel.target_part
+                    ] = f"![image]({dify_config.FILES_URL}/files/{upload_file.id}/file-preview)"
 
         return image_map
 

@@ -37,16 +37,19 @@ class SemanticIndexProcessor(BaseIndexProcessor):
 
         Args:
             extract_setting: Extraction configuration
-            **kwargs: Additional arguments (process_rule_mode, etc.)
+            **kwargs: Additional arguments (process_rule_mode, process_rule, vision_model_instance, etc.)
 
         Returns:
             List of extracted documents
         """
+        # Pass additional parameters to ExtractProcessor
         text_docs = ExtractProcessor.extract(
             extract_setting=extract_setting,
             is_automatic=(
                 kwargs.get("process_rule_mode") == "automatic" or kwargs.get("process_rule_mode") == "hierarchical"
             ),
+            process_rule=kwargs.get("process_rule"),
+            vision_model_instance=kwargs.get("vision_model_instance"),
         )
 
         return text_docs
