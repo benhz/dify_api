@@ -386,12 +386,13 @@ class SemanticTextSplitter(TextSplitter):
         chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf]', text))
 
         # Estimate tokens:
-        # - Chinese: ~1 token per character (conservative: 0.5)
+        # - Chinese: ~1.5-2 tokens per character (conservative: 1.5)
         # - English: ~1 token per 4 characters
         total_chars = len(text)
         english_chars = total_chars - chinese_chars
 
-        estimated_tokens = int(chinese_chars * 0.5 + english_chars / 4)
+        # Fixed: Chinese should be 1.5 tokens per char, not 0.5
+        estimated_tokens = int(chinese_chars * 1.5 + english_chars / 4)
 
         return max(1, estimated_tokens)  # At least 1 token
 
