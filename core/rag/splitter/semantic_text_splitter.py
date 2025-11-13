@@ -437,7 +437,7 @@ class SemanticTextSplitter(TextSplitter):
 
         Uses dual thresholds:
         - max_sentences_per_batch: 1000 sentences
-        - max_bytes_per_batch: 48KB UTF-8 bytes
+        - max_bytes_per_batch: 96KB UTF-8 bytes
 
         Accumulates texts into batches until either threshold is reached,
         then processes the batch and continues with remaining texts.
@@ -448,8 +448,8 @@ class SemanticTextSplitter(TextSplitter):
         Returns:
             List of embeddings (list[list[float]]) in original order
         """
-        MAX_SENTENCES_PER_BATCH = 64
-        MAX_BYTES_PER_BATCH = 24 * 1024  # 48 KiB
+        MAX_SENTENCES_PER_BATCH = 1000
+        MAX_BYTES_PER_BATCH = 96 * 1024  # 96 KiB
 
         all_embeddings = []
         current_batch = []
