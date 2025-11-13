@@ -83,15 +83,22 @@ class SemanticIndexProcessor(BaseIndexProcessor):
         # Get embedding model instance
         embedding_model_instance = kwargs.get("embedding_model_instance")
 
+        # For semantic_model, separator and max_tokens are optional
+        # Use sensible defaults if not provided
+        separator = rules.segmentation.separator or "\n\n"
+        # Use max_chunk_tokens if max_tokens is not provided (for semantic_model)
+        max_tokens = rules.segmentation.max_tokens or rules.segmentation.max_chunk_tokens or 1000
+        max_chunk_tokens = rules.segmentation.max_chunk_tokens or max_tokens
+
         # Create semantic splitter
         splitter = SemanticTextSplitter(
-            separator=rules.segmentation.separator,
-            max_tokens=rules.segmentation.max_tokens,
+            separator=separator,
+            max_tokens=max_tokens,
             chunk_overlap=rules.segmentation.chunk_overlap,
             threshold_amount=rules.segmentation.threshold_amount or 95,
             buffer_size=rules.segmentation.buffer_size or 2,
             min_chunk_tokens=rules.segmentation.min_chunk_tokens or 150,
-            max_chunk_tokens=rules.segmentation.max_chunk_tokens or rules.segmentation.max_tokens,
+            max_chunk_tokens=max_chunk_tokens,
             embedding_model_instance=embedding_model_instance,
         )
 
