@@ -438,7 +438,7 @@ class SemanticTextSplitter(TextSplitter):
         Uses triple thresholds:
         - max_chunks: Model's maximum batch size (from model schema)
         - max_bytes_per_batch: 48KB UTF-8 bytes
-        - Fallback: 16 texts per batch if max_chunks unavailable
+        - Fallback: 512 texts per batch if max_chunks unavailable
 
         Accumulates texts into batches until any threshold is reached,
         then processes the batch and continues with remaining texts.
@@ -450,7 +450,7 @@ class SemanticTextSplitter(TextSplitter):
             List of embeddings (list[list[float]]) in original order
         """
         # Get model's max_chunks limit (how many texts can be processed in one API call)
-        max_chunks = 16  # Safe default for most embedding models
+        max_chunks = 512  # Default for local embedding models
         if self._embedding_model_instance:
             try:
                 from typing import cast
