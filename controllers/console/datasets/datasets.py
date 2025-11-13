@@ -561,6 +561,12 @@ class DatasetIndexingEstimateApi(Resource):
             .add_argument("doc_form", type=str, default="text_model", required=False, nullable=False, location="json")
             .add_argument("dataset_id", type=str, required=False, nullable=False, location="json")
             .add_argument("doc_language", type=str, default="English", required=False, nullable=False, location="json")
+            .add_argument("embedding_model", type=str, required=False, nullable=True, location="json")
+            .add_argument("embedding_model_provider", type=str, required=False, nullable=True, location="json")
+            .add_argument("text_generation_model", type=str, required=False, nullable=True, location="json")
+            .add_argument("text_generation_model_provider", type=str, required=False, nullable=True, location="json")
+            .add_argument("vision_model", type=str, required=False, nullable=True, location="json")
+            .add_argument("vision_model_provider", type=str, required=False, nullable=True, location="json")
         )
         args = parser.parse_args()
         _, current_tenant_id = current_account_with_tenant()
@@ -634,6 +640,8 @@ class DatasetIndexingEstimateApi(Resource):
                 args["doc_language"],
                 args["dataset_id"],
                 args["indexing_technique"],
+                args.get("embedding_model"),
+                args.get("embedding_model_provider"),
             )
         except LLMBadRequestError:
             raise ProviderNotInitializeError(

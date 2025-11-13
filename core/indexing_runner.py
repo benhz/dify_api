@@ -251,6 +251,8 @@ class IndexingRunner:
         doc_language: str = "English",
         dataset_id: str | None = None,
         indexing_technique: str = "economy",
+        embedding_model: str | None = None,
+        embedding_model_provider: str | None = None,
     ) -> IndexingEstimate:
         """
         Estimate the indexing for the document.
@@ -264,11 +266,21 @@ class IndexingRunner:
                 raise ValueError(f"You have reached the batch upload limit of {batch_upload_limit}.")
 
         embedding_model_instance = None
-        if dataset_id:
-            dataset = db.session.query(Dataset).filter_by(id=dataset_id).first()
-            if not dataset:
-                raise ValueError("Dataset not found.")
-            if dataset.indexing_technique == "high_quality" or indexing_technique == "high_quality":
+        # Priority: explicit params > dataset settings > default
+        if indexing_technique == "high_quality":
+            if embedding_model and embedding_model_provider:
+                # Use explicitly provided embedding model parameters
+                embedding_model_instance = self.model_manager.get_model_instance(
+                    tenant_id=tenant_id,
+                    provider=embedding_model_provider,
+                    model_type=ModelType.TEXT_EMBEDDING,
+                    model=embedding_model,
+                )
+            elif dataset_id:
+                # Use dataset's embedding model settings
+                dataset = db.session.query(Dataset).filter_by(id=dataset_id).first()
+                if not dataset:
+                    raise ValueError("Dataset not found.")
                 if dataset.embedding_model_provider:
                     embedding_model_instance = self.model_manager.get_model_instance(
                         tenant_id=tenant_id,
@@ -281,8 +293,8 @@ class IndexingRunner:
                         tenant_id=tenant_id,
                         model_type=ModelType.TEXT_EMBEDDING,
                     )
-        else:
-            if indexing_technique == "high_quality":
+            else:
+                # Use default embedding model
                 embedding_model_instance = self.model_manager.get_default_model_instance(
                     tenant_id=tenant_id,
                     model_type=ModelType.TEXT_EMBEDDING,
