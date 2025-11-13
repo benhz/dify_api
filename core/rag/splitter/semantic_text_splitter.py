@@ -435,11 +435,12 @@ class SemanticTextSplitter(TextSplitter):
         """
         Get embeddings with dynamic batching to handle large text lists safely.
 
-        Uses dual thresholds:
-        - max_sentences_per_batch: 1000 sentences
-        - max_bytes_per_batch: 96KB UTF-8 bytes
+        Uses triple thresholds:
+        - max_chunks: Model's maximum batch size (from model schema)
+        - max_bytes_per_batch: 48KB UTF-8 bytes
+        - Fallback: 16 texts per batch if max_chunks unavailable
 
-        Accumulates texts into batches until either threshold is reached,
+        Accumulates texts into batches until any threshold is reached,
         then processes the batch and continues with remaining texts.
 
         Args:
@@ -448,8 +449,26 @@ class SemanticTextSplitter(TextSplitter):
         Returns:
             List of embeddings (list[list[float]]) in original order
         """
-        MAX_SENTENCES_PER_BATCH = 1000
-        MAX_BYTES_PER_BATCH = 96 * 1024  # 96 KiB
+        # Get model's max_chunks limit (how many texts can be processed in one API call)
+        max_chunks = 16  # Safe default for most embedding models
+        if self._embedding_model_instance:
+            try:
+                from typing import cast
+                from core.model_runtime.entities.model_entities import ModelPropertyKey
+                from core.model_runtime.model_providers.__base.text_embedding_model import TextEmbeddingModel
+
+                model_type_instance = cast(TextEmbeddingModel, self._embedding_model_instance.model_type_instance)
+                model_schema = model_type_instance.get_model_schema(
+                    self._embedding_model_instance.model,
+                    self._embedding_model_instance.credentials
+                )
+                if model_schema and ModelPropertyKey.MAX_CHUNKS in model_schema.model_properties:
+                    max_chunks = model_schema.model_properties[ModelPropertyKey.MAX_CHUNKS]
+            except Exception:
+                # If we can't get max_chunks, use safe default
+                pass
+
+        MAX_BYTES_PER_BATCH = 48 * 1024  # 48 KiB
 
         all_embeddings = []
         current_batch = []
@@ -458,8 +477,8 @@ class SemanticTextSplitter(TextSplitter):
         for text in texts:
             text_bytes = len(text.encode('utf-8'))
 
-            # Check if adding this text would exceed either threshold
-            would_exceed_count = len(current_batch) >= MAX_SENTENCES_PER_BATCH
+            # Check if adding this text would exceed any threshold
+            would_exceed_count = len(current_batch) >= max_chunks
             would_exceed_bytes = current_bytes + text_bytes > MAX_BYTES_PER_BATCH
 
             # If batch is not empty and would exceed, process current batch
