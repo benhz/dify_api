@@ -2323,7 +2323,15 @@ class DocumentService:
                 if not isinstance(knowledge_config.process_rule.rules.segmentation.separator, str):
                     raise ValueError("Process rule segmentation separator is invalid")
 
-            if not (
+            # For semantic_model, use max_chunk_tokens instead of max_tokens
+            # For other modes, max_tokens is required (except hierarchical full-doc)
+            if knowledge_config.doc_form == "semantic_model":
+                # Semantic chunking requires max_chunk_tokens and min_chunk_tokens
+                if not knowledge_config.process_rule.rules.segmentation.max_chunk_tokens:
+                    raise ValueError("Process rule segmentation max_chunk_tokens is required for semantic_model")
+                if not knowledge_config.process_rule.rules.segmentation.min_chunk_tokens:
+                    raise ValueError("Process rule segmentation min_chunk_tokens is required for semantic_model")
+            elif not (
                 knowledge_config.process_rule.mode == "hierarchical"
                 and knowledge_config.process_rule.rules.parent_mode == "full-doc"
             ):
@@ -2449,14 +2457,24 @@ class DocumentService:
                 if not isinstance(args["process_rule"]["rules"]["segmentation"]["separator"], str):
                     raise ValueError("Process rule segmentation separator is invalid")
 
-            if (
-                "max_tokens" not in args["process_rule"]["rules"]["segmentation"]
-                or not args["process_rule"]["rules"]["segmentation"]["max_tokens"]
-            ):
-                raise ValueError("Process rule segmentation max_tokens is required")
+            # For semantic_model, use max_chunk_tokens instead of max_tokens
+            # For other modes, max_tokens is required
+            if doc_form == "semantic_model":
+                # Semantic chunking requires max_chunk_tokens and min_chunk_tokens
+                segmentation = args["process_rule"]["rules"]["segmentation"]
+                if "max_chunk_tokens" not in segmentation or not segmentation["max_chunk_tokens"]:
+                    raise ValueError("Process rule segmentation max_chunk_tokens is required for semantic_model")
+                if "min_chunk_tokens" not in segmentation or not segmentation["min_chunk_tokens"]:
+                    raise ValueError("Process rule segmentation min_chunk_tokens is required for semantic_model")
+            else:
+                if (
+                    "max_tokens" not in args["process_rule"]["rules"]["segmentation"]
+                    or not args["process_rule"]["rules"]["segmentation"]["max_tokens"]
+                ):
+                    raise ValueError("Process rule segmentation max_tokens is required")
 
-            if not isinstance(args["process_rule"]["rules"]["segmentation"]["max_tokens"], int):
-                raise ValueError("Process rule segmentation max_tokens is invalid")
+                if not isinstance(args["process_rule"]["rules"]["segmentation"]["max_tokens"], int):
+                    raise ValueError("Process rule segmentation max_tokens is invalid")
 
             # Validate semantic chunking parameters (optional)
             segmentation = args["process_rule"]["rules"]["segmentation"]
