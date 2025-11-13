@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -58,14 +58,14 @@ class PreProcessingRule(BaseModel):
 
 
 class Segmentation(BaseModel):
-    separator: str | None = "\n"  # Optional for semantic_model
-    max_tokens: int | None = None  # Optional for semantic_model (uses max_chunk_tokens instead)
+    separator: Optional[str] = "\n"  # Optional for semantic_model
+    max_tokens: Optional[int] = None  # Optional for semantic_model (uses max_chunk_tokens instead)
     chunk_overlap: int = 0
     # Semantic chunking parameters
-    threshold_amount: int | None = None  # Threshold percentage (e.g., 95)
-    buffer_size: int | None = None  # Smoothing window size (e.g., 2)
-    min_chunk_tokens: int | None = None  # Minimum chunk size (e.g., 150)
-    max_chunk_tokens: int | None = None  # Maximum chunk size (e.g., 1000)
+    threshold_amount: Optional[int] = None  # Threshold percentage (e.g., 95)
+    buffer_size: Optional[int] = None  # Smoothing window size (e.g., 2)
+    min_chunk_tokens: Optional[int] = None  # Minimum chunk size (e.g., 150)
+    max_chunk_tokens: Optional[int] = None  # Maximum chunk size (e.g., 1000)
 
 
 class Rule(BaseModel):
