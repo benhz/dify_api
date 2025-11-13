@@ -58,8 +58,8 @@ class PreProcessingRule(BaseModel):
 
 
 class Segmentation(BaseModel):
-    separator: str = "\n"
-    max_tokens: int
+    separator: str | None = "\n"  # Optional for semantic_model
+    max_tokens: int | None = None  # Optional for semantic_model (uses max_chunk_tokens instead)
     chunk_overlap: int = 0
     # Semantic chunking parameters
     threshold_amount: int | None = None  # Threshold percentage (e.g., 95)
