@@ -2314,11 +2314,14 @@ class DocumentService:
             if not knowledge_config.process_rule.rules.segmentation:
                 raise ValueError("Process rule segmentation is required")
 
-            if not knowledge_config.process_rule.rules.segmentation.separator:
-                raise ValueError("Process rule segmentation separator is required")
+            # For semantic chunking, separator is optional (uses sentence-based splitting)
+            # For other modes, separator is required
+            if knowledge_config.doc_form != "semantic_model":
+                if not knowledge_config.process_rule.rules.segmentation.separator:
+                    raise ValueError("Process rule segmentation separator is required")
 
-            if not isinstance(knowledge_config.process_rule.rules.segmentation.separator, str):
-                raise ValueError("Process rule segmentation separator is invalid")
+                if not isinstance(knowledge_config.process_rule.rules.segmentation.separator, str):
+                    raise ValueError("Process rule segmentation separator is invalid")
 
             if not (
                 knowledge_config.process_rule.mode == "hierarchical"
@@ -2433,14 +2436,18 @@ class DocumentService:
             if not isinstance(args["process_rule"]["rules"]["segmentation"], dict):
                 raise ValueError("Process rule segmentation is invalid")
 
-            if (
-                "separator" not in args["process_rule"]["rules"]["segmentation"]
-                or not args["process_rule"]["rules"]["segmentation"]["separator"]
-            ):
-                raise ValueError("Process rule segmentation separator is required")
+            # For semantic chunking, separator is optional (uses sentence-based splitting)
+            # For other modes, separator is required
+            doc_form = args.get("doc_form", "text_model")
+            if doc_form != "semantic_model":
+                if (
+                    "separator" not in args["process_rule"]["rules"]["segmentation"]
+                    or not args["process_rule"]["rules"]["segmentation"]["separator"]
+                ):
+                    raise ValueError("Process rule segmentation separator is required")
 
-            if not isinstance(args["process_rule"]["rules"]["segmentation"]["separator"], str):
-                raise ValueError("Process rule segmentation separator is invalid")
+                if not isinstance(args["process_rule"]["rules"]["segmentation"]["separator"], str):
+                    raise ValueError("Process rule segmentation separator is invalid")
 
             if (
                 "max_tokens" not in args["process_rule"]["rules"]["segmentation"]
