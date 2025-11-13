@@ -275,7 +275,7 @@ class SemanticTextSplitter(TextSplitter):
                     current_text_lines = []
 
                 # Check if this is the start of a new table
-                is_table_start = i not in table_line_indices or (i > 0 and i - 1 not in table_line_indices)
+                is_table_start = (i == 0 or i - 1 not in table_line_indices)
                 if is_table_start or not segments or segments[-1][0] != 'table':
                     # Start a new table segment
                     table_lines = []
