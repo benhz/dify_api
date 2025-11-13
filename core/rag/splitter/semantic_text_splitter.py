@@ -451,10 +451,12 @@ class SemanticTextSplitter(TextSplitter):
         if self._embedding_model_instance:
             try:
                 # Use dynamic batching to avoid timeout and improve performance
-                result = self._get_embeddings_with_batching(texts)
-                if hasattr(result, "embeddings"):
-                    embeddings = np.array(result.embeddings, dtype=np.float32)
+                embeddings_list = self._get_embeddings_with_batching(texts)
+                if embeddings_list:
+                    embeddings = np.array(embeddings_list, dtype=np.float32)
                     return embeddings
+                else:
+                    return self._fallback_embeddings(texts)
             except Exception:
                 # Fallback to simple hash-based embeddings if model fails
                 return self._fallback_embeddings(texts)
@@ -571,8 +573,8 @@ class SemanticTextSplitter(TextSplitter):
         # Generate embeddings
         embeddings = self._get_embeddings(sentences)
 
-        # Check if embeddings are empty or invalid shape
-        if embeddings.size == 0 or len(embeddings.shape) < 2:
+        # Check if embeddings are None, empty or invalid shape
+        if embeddings is None or embeddings.size == 0 or len(embeddings.shape) < 2:
             return []
 
         # Calculate similarities between consecutive sentences
