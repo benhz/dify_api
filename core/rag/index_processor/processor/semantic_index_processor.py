@@ -90,11 +90,10 @@ class SemanticIndexProcessor(BaseIndexProcessor):
         max_tokens = rules.segmentation.max_tokens or rules.segmentation.max_chunk_tokens or 1000
         max_chunk_tokens = rules.segmentation.max_chunk_tokens or max_tokens
 
-        # For semantic chunking, use overlap if specified; otherwise use 50 tokens (default)
-        # Overlap helps maintain context continuity between chunks for better retrieval
-        chunk_overlap = rules.segmentation.chunk_overlap
-        if chunk_overlap == 0:  # If not specified (default is 0), use smart default
-            chunk_overlap = 50  # ~33 Chinese characters, provides good context continuity
+        # Note: chunk_overlap parameter is not used in semantic chunking
+        # Instead, we automatically add 1-2 buffer sentences after each chunk
+        # This provides natural context continuity without token-based overlap
+        chunk_overlap = 0  # Always 0 for semantic model (uses sentence buffer instead)
 
         # Create semantic splitter
         splitter = SemanticTextSplitter(

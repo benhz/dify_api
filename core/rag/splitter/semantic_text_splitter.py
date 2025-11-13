@@ -796,45 +796,61 @@ class SemanticTextSplitter(TextSplitter):
 
     def _add_overlap(self, chunks: list[str]) -> list[str]:
         """
-        Step 4: Add overlap between chunks to maintain context continuity.
+        Step 4: Add buffer sentences after each chunk for context continuity.
 
-        Overlap structure:
-        [Chunk1]
-        [Last N tokens of Chunk1 + Chunk2 + Last N tokens of Chunk2]
-        [Last N tokens of Chunk2 + Chunk3 + ...]
+        Instead of prepending previous chunk's tail, we append 1-2 sentences
+        from the next chunk as a "look-ahead" buffer. This provides context
+        about what's coming next without duplicating large amounts of text.
+
+        Structure:
+        [Chunk1 + 1-2 sentences from Chunk2]
+        [Chunk2 + 1-2 sentences from Chunk3]
+        [Chunk3 + ...]
 
         Args:
             chunks: List of chunks
 
         Returns:
-            List of chunks with overlap added
+            List of chunks with buffer sentences appended
         """
-        if not chunks or self._chunk_overlap <= 0 or len(chunks) <= 1:
+        if not chunks or len(chunks) <= 1:
             return chunks
 
-        overlapped_chunks = []
+        buffered_chunks = []
 
         for i in range(len(chunks)):
             chunk = chunks[i]
-            prefix = ""
-            suffix = ""
 
-            # Add prefix: last N tokens from previous chunk
-            if i > 0:
-                prev_chunk = chunks[i - 1]
-                prefix = self._get_last_n_tokens(prev_chunk, self._chunk_overlap)
+            # Add buffer: 1-2 sentences from next chunk
+            if i + 1 < len(chunks):
+                next_chunk = chunks[i + 1]
+                buffer = self._get_first_n_sentences(next_chunk, sentences_count=2)
 
-            # Add suffix: first N tokens from next chunk (prepare for next chunk's prefix)
-            # Actually, we only add current chunk + prepare suffix for calculation
-            # The next chunk will use current chunk's suffix as its prefix
+                if buffer:
+                    chunk = chunk + ' ' + buffer
 
-            # Combine: prefix + current_chunk
-            if prefix:
-                chunk = prefix + ' ' + chunk
+            buffered_chunks.append(chunk.strip())
 
-            overlapped_chunks.append(chunk.strip())
+        return buffered_chunks
 
-        return overlapped_chunks
+    def _get_first_n_sentences(self, text: str, sentences_count: int = 2) -> str:
+        """
+        Get the first N sentences from text as buffer.
+
+        Args:
+            text: Input text
+            sentences_count: Number of sentences to extract (default: 2)
+
+        Returns:
+            First N sentences as string
+        """
+        sentences = self._split_into_sentences(text)
+        if not sentences:
+            return ""
+
+        # Take first N sentences
+        buffer_sentences = sentences[:sentences_count]
+        return ' '.join(buffer_sentences)
 
     def _get_last_n_tokens(self, text: str, n_tokens: int) -> str:
         """
@@ -924,13 +940,18 @@ class SemanticTextSplitter(TextSplitter):
             i += 1
 
         # Second pass: ensure no chunk exceeds max_chunk_tokens
+        # Allow up to 20% overage for buffer sentences (1-2 sentences added in Step 4)
+        max_allowed_tokens = int(self._max_chunk_tokens * 1.2)
+
         final_chunks = []
         for chunk in merged_chunks:
             chunk_tokens = self._get_token_count(chunk)
 
-            if chunk_tokens <= self._max_chunk_tokens:
+            # Allow buffer overage: if within 20% of max, keep it
+            if chunk_tokens <= max_allowed_tokens:
                 final_chunks.append(chunk)
             else:
+                # Chunk is too large even with buffer allowance, must split
                 # Check if this is a table - if so, split by rows
                 if self._is_table(chunk):
                     sub_chunks = self._split_table_by_rows(chunk, self._max_chunk_tokens)
